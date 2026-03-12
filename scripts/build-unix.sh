@@ -31,8 +31,10 @@ repo_root="$(cd "${script_dir}/.." && pwd)"
 aria2_repo_url="${ARIA2_REPO_URL:-https://github.com/aria2/aria2.git}"
 aria2_local_source="${ARIA2_SOURCE_DIR:-${repo_root}/aria2}"
 source_origin="$aria2_repo_url"
+is_local_source=0
 if [[ -d "${aria2_local_source}/.git" ]]; then
   source_origin="$aria2_local_source"
+  is_local_source=1
 fi
 
 source_dir="${work_dir}/aria2-source"
@@ -44,7 +46,11 @@ mkdir -p "$work_dir" "$output_dir"
 rm -rf "$source_dir" "$build_dir" "$install_dir" "$package_dir"
 
 echo "Cloning aria2 from ${source_origin} (${aria2_ref})"
-git clone --depth 1 --branch "$aria2_ref" "$source_origin" "$source_dir"
+if [[ "$is_local_source" -eq 1 ]]; then
+  git clone --branch "$aria2_ref" "$source_origin" "$source_dir"
+else
+  git clone --depth 1 --branch "$aria2_ref" "$source_origin" "$source_dir"
+fi
 
 if [[ "$platform" == "macos" && -z "${LIBTOOLIZE:-}" ]] && command -v glibtoolize >/dev/null 2>&1; then
   export LIBTOOLIZE=glibtoolize

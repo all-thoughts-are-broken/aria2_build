@@ -36,7 +36,7 @@ jobs:
           - os: ubuntu-24.04
             package_id: linux-x64
             platform: linux
-          - os: macos-13
+          - os: macos-15-intel
             package_id: macos-x64
             platform: macos
           - os: windows-2022

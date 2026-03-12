@@ -35,8 +35,10 @@ $mileAria2LocalSource = if ($env:MILE_ARIA2_SOURCE_DIR) {
 }
 
 $sourceOrigin = $mileAria2RepoUrl
+$isLocalSource = $false
 if (Test-Path (Join-Path $mileAria2LocalSource ".git")) {
     $sourceOrigin = $mileAria2LocalSource
+    $isLocalSource = $true
 }
 
 $sourceDir = Join-Path $WorkDir "Mile.Aria2-source"
@@ -52,7 +54,12 @@ if (Test-Path $packageDir) {
 }
 
 Write-Host "Cloning Mile.Aria2 from $sourceOrigin ($MileAria2Ref)"
-git clone --depth 1 --branch $MileAria2Ref $sourceOrigin $sourceDir
+if ($isLocalSource) {
+    git clone --branch $MileAria2Ref $sourceOrigin $sourceDir
+}
+else {
+    git clone --depth 1 --branch $MileAria2Ref $sourceOrigin $sourceDir
+}
 
 $configPath = Join-Path $sourceDir "Mile.Aria2.Library\config.h"
 $configContent = Get-Content -Raw $configPath
@@ -79,22 +86,79 @@ $dependenciesContent = $dependenciesContent.Replace(
 [System.IO.File]::WriteAllText($dependenciesPropsPath, $dependenciesContent, [System.Text.UTF8Encoding]::new($false))
 
 $vcxprojPath = Join-Path $sourceDir "Mile.Aria2.Library\Mile.Aria2.Library.vcxproj"
-$vcxprojContent = Get-Content -Raw $vcxprojPath
-$vcxprojContent = [regex]::Replace(
-    $vcxprojContent,
-    '(?ms)^\s*<Import Project="\.\.\\Mile\.Aria2\.Wslay\\Mile\.Aria2\.Wslay\.props" />\r?\n?',
-    "")
-[System.IO.File]::WriteAllText($vcxprojPath, $vcxprojContent, [System.Text.UTF8Encoding]::new($false))
+[xml]$vcxprojXml = Get-Content $vcxprojPath
+$wslayImports = $vcxprojXml.SelectNodes('/*[local-name()="Project"]/*[local-name()="Import"]') | Where-Object {
+    $_.Project -eq "..\Mile.Aria2.Wslay\Mile.Aria2.Wslay.props"
+}
+foreach ($wslayImport in $wslayImports) {
+    [void]$wslayImport.ParentNode.RemoveChild($wslayImport)
+}
+
+$excludedCompilePatterns = @(
+    "AbstractBtMessage.cc",
+    "ActivePeerConnectionCommand.cc",
+    "AnnounceList.cc",
+    "AnnounceTier.cc",
+    "bittorrent_helper.cc",
+    "Bt*.cc",
+    "DefaultBt*.cc",
+    "DHT*.cc",
+    "ExpatXmlParser.cc",
+    "HandshakeExtensionMessage.cc",
+    "IndexBtMessage*.cc",
+    "InitiatorMSEHandshakeCommand.cc",
+    "Lpd*.cc",
+    "magnet.cc",
+    "main.cc",
+    "metalink_helper.cc",
+    "Metalink*.cc",
+    "MSEHandshake.cc",
+    "NameResolveCommand.cc",
+    "PeerInteractionCommand.cc",
+    "PeerReceiveHandshakeCommand.cc",
+    "ReceiverMSEHandshakeCommand.cc",
+    "Sftp*.cc",
+    "SSHSession.cc",
+    "TorrentAttribute.cc",
+    "TrackerWatcherCommand.cc",
+    "UTMetadata*.cc",
+    "UTPexExtensionMessage.cc",
+    "WebSocket*.cc",
+    "Xml*.cc",
+    "ZeroBtMessage.cc"
+)
+
+$compileNodes = @(
+    $vcxprojXml.SelectNodes(
+        '/*[local-name()="Project"]/*[local-name()="ItemGroup"]/*[local-name()="ClCompile" and @Include]'
+    )
+)
+foreach ($node in $compileNodes) {
+    $includePath = [string]$node.Include
+    foreach ($pattern in $excludedCompilePatterns) {
+        if ($includePath -like $pattern) {
+            [void]$node.ParentNode.RemoveChild($node)
+            break
+        }
+    }
+}
+
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$streamWriter = [System.IO.StreamWriter]::new($vcxprojPath, $false, $utf8NoBom)
+try {
+    $vcxprojXml.Save($streamWriter)
+}
+finally {
+    $streamWriter.Dispose()
+}
 
 $projectPath = Join-Path $sourceDir "Mile.Aria2.Library\Mile.Aria2.Library.vcxproj"
 Write-Host "Building $projectPath"
 msbuild $projectPath /m /restore /p:Configuration=$Configuration /p:Platform=$Platform /p:PreferredToolArchitecture=x64
 
-$builtLibrary = Get-ChildItem -Path $sourceDir -Recurse -Filter "Mile.Aria2.Library.lib" |
-    Sort-Object FullName |
-    Select-Object -First 1
-if (-not $builtLibrary) {
-    throw "Mile.Aria2.Library.lib was not produced."
+$builtLibraryPath = Join-Path $sourceDir "Output\Binaries\$Configuration\$Platform\Mile.Aria2.Library.lib"
+if (-not (Test-Path $builtLibraryPath)) {
+    throw "Mile.Aria2.Library.lib was not produced at $builtLibraryPath."
 }
 
 $zlibPath = Join-Path $sourceDir "Mile.Aria2.Dependencies\Lib\$Platform\zlib.lib"
@@ -107,7 +171,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $packageDir "lib") | Out-Nu
 New-Item -ItemType Directory -Force -Path (Join-Path $packageDir "cmake") | Out-Null
 
 Copy-Item (Join-Path $sourceDir "Mile.Aria2.Library\Include\aria2\aria2.h") (Join-Path $packageDir "include\aria2\aria2.h")
-Copy-Item $builtLibrary.FullName (Join-Path $packageDir "lib\aria2.lib")
+Copy-Item $builtLibraryPath (Join-Path $packageDir "lib\aria2.lib")
 Copy-Item $zlibPath (Join-Path $packageDir "lib\zlib.lib")
 Copy-Item (Join-Path $sourceDir "License.md") (Join-Path $packageDir "LICENSE.Mile.Aria2.md")
 
