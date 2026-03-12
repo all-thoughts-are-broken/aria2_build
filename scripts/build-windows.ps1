@@ -95,6 +95,7 @@ foreach ($wslayImport in $wslayImports) {
 }
 
 $excludedCompilePatterns = @(
+    "alloca.c",
     "AbstractBtMessage.cc",
     "ActivePeerConnectionCommand.cc",
     "AnnounceList.cc",
@@ -102,6 +103,8 @@ $excludedCompilePatterns = @(
     "bittorrent_helper.cc",
     "Bt*.cc",
     "DefaultBt*.cc",
+    "DefaultExtensionMessageFactory.cc",
+    "DefaultPeerStorage.cc",
     "DHT*.cc",
     "ExpatXmlParser.cc",
     "HandshakeExtensionMessage.cc",
@@ -114,18 +117,30 @@ $excludedCompilePatterns = @(
     "Metalink*.cc",
     "MSEHandshake.cc",
     "NameResolveCommand.cc",
+    "Peer*.cc",
     "PeerInteractionCommand.cc",
     "PeerReceiveHandshakeCommand.cc",
+    "RangeBtMessage*.cc",
     "ReceiverMSEHandshakeCommand.cc",
     "Sftp*.cc",
+    "SimpleBtMessage.cc",
+    "Sqlite3CookieParser*.cc",
     "SSHSession.cc",
     "TorrentAttribute.cc",
     "TrackerWatcherCommand.cc",
+    "UDPTracker*.cc",
     "UTMetadata*.cc",
     "UTPexExtensionMessage.cc",
     "WebSocket*.cc",
     "Xml*.cc",
     "ZeroBtMessage.cc"
+)
+
+$requiredCompileFiles = @(
+    "DefaultBtProgressInfoFile.cc",
+    "MetalinkHttpEntry.cc",
+    "PeerStat.cc",
+    "XmlRpcRequestParserController.cc"
 )
 
 $compileNodes = @(
@@ -135,6 +150,10 @@ $compileNodes = @(
 )
 foreach ($node in $compileNodes) {
     $includePath = [string]$node.Include
+    $fileName = [System.IO.Path]::GetFileName($includePath)
+    if ($requiredCompileFiles -contains $fileName) {
+        continue
+    }
     foreach ($pattern in $excludedCompilePatterns) {
         if ($includePath -like $pattern) {
             [void]$node.ParentNode.RemoveChild($node)
@@ -187,7 +206,7 @@ if(NOT TARGET Aria2::aria2)
     IMPORTED_LOCATION "${_ARIA2_PREFIX}/lib/aria2.lib"
     INTERFACE_INCLUDE_DIRECTORIES "${_ARIA2_PREFIX}/include"
     INTERFACE_LINK_LIBRARIES
-      "${_ARIA2_PREFIX}/lib/zlib.lib;Advapi32;Crypt32;Iphlpapi;Secur32;Ws2_32"
+      "${_ARIA2_PREFIX}/lib/zlib.lib;Advapi32;Crypt32;Iphlpapi;Secur32;User32;Ws2_32"
   )
 endif()
 

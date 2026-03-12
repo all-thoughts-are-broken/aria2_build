@@ -3,6 +3,7 @@ Mile.Aria2/
 
 .work/
 .dist/
+.verify/
 out/
 dist/
 build/
