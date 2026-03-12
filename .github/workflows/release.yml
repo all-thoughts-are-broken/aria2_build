@@ -1,0 +1,127 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub release tag, for example v1.37.0-1
+        required: true
+        type: string
+      package_version:
+        description: Version written into Aria2ConfigVersion.cmake
+        required: true
+        type: string
+      aria2_ref:
+        description: aria2 git ref (branch or tag)
+        required: true
+        default: master
+        type: string
+      mile_aria2_ref:
+        description: Mile.Aria2 git ref (branch or tag)
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build-${{ matrix.package_id }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            package_id: linux-x64
+            platform: linux
+          - os: macos-13
+            package_id: macos-x64
+            platform: macos
+          - os: windows-2022
+            package_id: windows-x64-msvc-mt
+            platform: windows
+
+    steps:
+      - name: Checkout packaging repo
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake autopoint gettext libtool pkg-config zlib1g-dev libssl-dev
+
+      - name: Install macOS build dependencies
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          brew install autoconf automake gettext libtool pkg-config
+          echo "$(brew --prefix gettext)/bin" >> "$GITHUB_PATH"
+
+      - name: Set up MSBuild
+        if: matrix.platform == 'windows'
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Unix package
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          bash scripts/build-unix.sh \
+            "${{ matrix.platform }}" \
+            "${{ inputs.package_version }}" \
+            "${{ runner.temp }}/work" \
+            "${{ github.workspace }}/out" \
+            "${{ inputs.aria2_ref }}"
+
+      - name: Build Windows package
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          ./scripts/build-windows.ps1 `
+            -PackageVersion "${{ inputs.package_version }}" `
+            -WorkDir "${{ runner.temp }}\work" `
+            -OutputDir "${{ github.workspace }}\out" `
+            -MileAria2Ref "${{ inputs.mile_aria2_ref }}"
+
+      - name: Archive package
+        shell: pwsh
+        env:
+          ARCHIVE_NAME: aria2-minimal-${{ inputs.release_tag }}-${{ matrix.package_id }}.zip
+        run: |
+          $archivePath = Join-Path $env:RUNNER_TEMP $env:ARCHIVE_NAME
+          Push-Location (Join-Path $env:GITHUB_WORKSPACE "out")
+          cmake -E tar cf $archivePath --format=zip package
+          Pop-Location
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package_id }}
+          path: ${{ runner.temp }}/aria2-minimal-${{ inputs.release_tag }}-${{ matrix.package_id }}.zip
+          if-no-files-found: error
+
+  release:
+    name: publish-release
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: release-artifacts/**/*.zip
+          body: |
+            Upstream refs
+            - aria2: `${{ inputs.aria2_ref }}`
+            - Mile.Aria2: `${{ inputs.mile_aria2_ref }}`
